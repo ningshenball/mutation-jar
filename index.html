@@ -338,6 +338,37 @@
       background: linear-gradient(135deg, #a78bfa, #7c3aed);
       color: #faf5ff;
     }
+
+    .scratch-controls {
+      width: min(100%, 40rem);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 10px 14px;
+    }
+
+    #flip {
+      width: 180px;
+      accent-color: #a78bfa;
+    }
+
+    #scratch {
+      margin-top: 0;
+    }
+
+    .decode-lines {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .95rem;
+    }
+
+    .decode-line {
+      color: #e2e8f0;
+    }
   </style>
 </head>
 
@@ -358,6 +389,17 @@
       <button type="button" id="seal" class="correct-btn">Seal</button>
     </div>
     <div id="sealed" class="sealed-row"></div>
+    <div class="scratch-controls">
+      <label class="note-label" for="flip">flip chance</label>
+      <input id="flip" type="range" min="0" max="0.3" step="0.01" value="0">
+      <span id="flip-value" class="note-label">0</span>
+      <button type="button" id="scratch" class="correct-btn">Scratch</button>
+    </div>
+    <div id="scratched" class="sealed-row"></div>
+    <div class="decode-lines">
+      <p class="decode-line" id="raw-line">raw: <span id="raw"></span></p>
+      <p class="decode-line" id="repaired-line">repaired: <span id="repaired"></span></p>
+    </div>
   </section>
 
   <script>
@@ -500,6 +542,9 @@
       var PARITY = { 0: true, 1: true, 3: true };
       var note = document.getElementById('note');
       var sealed = document.getElementById('sealed');
+      var scratched = document.getElementById('scratched');
+      var flip = document.getElementById('flip');
+      var flipValue = document.getElementById('flip-value');
 
       function blockFromNibble(nibble) {
         var d3 = (nibble >> 3) & 1;
@@ -509,26 +554,91 @@
         return [d3 ^ d5 ^ d7, d3 ^ d6 ^ d7, d3, d5 ^ d6 ^ d7, d5, d6, d7];
       }
 
+      function renderBlocks(container, blocks) {
+        container.replaceChildren();
+        blocks.forEach(function (bits) {
+          var block = document.createElement('div');
+          block.className = 'sealed-block';
+          bits.forEach(function (bit, i) {
+            var cell = document.createElement('div');
+            cell.className = 'sealed-bit ' + (PARITY[i] ? 'parity' : 'data');
+            cell.setAttribute('data-v', String(bit));
+            cell.textContent = String(bit);
+            block.appendChild(cell);
+          });
+          container.appendChild(block);
+        });
+      }
+
+      function readBlocks(container) {
+        return Array.prototype.map.call(container.children, function (block) {
+          return Array.prototype.map.call(block.children, function (cell) {
+            return cell.textContent === '1' ? 1 : 0;
+          });
+        });
+      }
+
+      function nibbleFrom(bits) {
+        return (bits[2] << 3) | (bits[4] << 2) | (bits[5] << 1) | bits[6];
+      }
+
+      function syndrome(bits) {
+        var check1 = bits[0] ^ bits[2] ^ bits[4] ^ bits[6];
+        var check2 = bits[1] ^ bits[2] ^ bits[5] ^ bits[6];
+        var check4 = bits[3] ^ bits[4] ^ bits[5] ^ bits[6];
+        return (check4 << 2) | (check2 << 1) | check1;
+      }
+
+      function repairBlock(bits) {
+        var next = bits.slice();
+        var syn = syndrome(next);
+        if (syn >= 1 && syn <= 7) next[syn - 1] ^= 1;
+        return next;
+      }
+
+      function charFrom(byte) {
+        if (byte < 32 || byte === 127) return '?';
+        return String.fromCharCode(byte);
+      }
+
+      function decode(blocks) {
+        var text = '';
+        for (var i = 0; i < blocks.length; i += 2) {
+          if (i + 1 >= blocks.length || blocks[i].length !== 7 || blocks[i + 1].length !== 7) {
+            text += '?';
+            break;
+          }
+          var byte = (nibbleFrom(blocks[i]) << 4) | nibbleFrom(blocks[i + 1]);
+          text += charFrom(byte);
+        }
+        return text;
+      }
+
       document.getElementById('seal').addEventListener('click', function () {
         var text = note.value.slice(0, 8);
-        sealed.replaceChildren();
+        var blocks = [];
         for (var c = 0; c < text.length; c++) {
           var byte = text.charCodeAt(c) & 255;
-          var nibbles = [(byte >> 4) & 15, byte & 15];
-          nibbles.forEach(function (nibble) {
-            var bits = blockFromNibble(nibble);
-            var block = document.createElement('div');
-            block.className = 'sealed-block';
-            bits.forEach(function (bit, i) {
-              var cell = document.createElement('div');
-              cell.className = 'sealed-bit ' + (PARITY[i] ? 'parity' : 'data');
-              cell.setAttribute('data-v', String(bit));
-              cell.textContent = String(bit);
-              block.appendChild(cell);
-            });
-            sealed.appendChild(block);
-          });
+          blocks.push(blockFromNibble((byte >> 4) & 15));
+          blocks.push(blockFromNibble(byte & 15));
         }
+        renderBlocks(sealed, blocks);
+      });
+
+      flip.addEventListener('input', function () {
+        flipValue.textContent = flip.value;
+      });
+
+      document.getElementById('scratch').addEventListener('click', function () {
+        var chance = Number(flip.value);
+        var copy = readBlocks(sealed).map(function (bits) {
+          return bits.map(function (bit) {
+            return Math.random() < chance ? bit ^ 1 : bit;
+          });
+        });
+        renderBlocks(scratched, copy);
+        document.getElementById('raw').textContent = decode(copy);
+        document.getElementById('repaired').textContent = decode(copy.map(repairBlock));
       });
     })();
   </script>
