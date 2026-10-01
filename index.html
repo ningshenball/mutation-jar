@@ -19,10 +19,11 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: safe center;
       background: #0c0e14;
       font-family: 'Inter', sans-serif;
       color: #e2e8f0;
+      padding: 2.5rem 1rem;
     }
 
     h1 {
@@ -242,6 +243,101 @@
     .flipping {
       animation: flip .25s ease
     }
+
+    .text-encode {
+      margin-top: 2.8rem;
+      width: min(100%, 960px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .note-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .85rem;
+      color: #94a3b8;
+      letter-spacing: .04em;
+    }
+
+    .seal-controls {
+      width: min(100%, 36rem);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #note {
+      flex: 1 1 14rem;
+      min-width: 0;
+      height: 42px;
+      padding: 0 14px;
+      border: none;
+      border-radius: 12px;
+      background: #1e2130;
+      color: #e2e8f0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .95rem;
+      outline: none;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+    }
+
+    #note:focus-visible {
+      box-shadow: 0 0 0 2px #7c3aed;
+    }
+
+    #seal {
+      margin-top: 0;
+    }
+
+    .sealed-row {
+      width: 100%;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 16px 18px;
+    }
+
+    .sealed-block {
+      display: flex;
+      gap: 4px;
+    }
+
+    .sealed-bit {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .8rem;
+      font-weight: 700;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .sealed-bit.data[data-v="0"] {
+      background: #1e2130;
+      color: #64748b;
+    }
+
+    .sealed-bit.data[data-v="1"] {
+      background: linear-gradient(135deg, #6ee7b7, #34d399);
+      color: #064e3b;
+    }
+
+    .sealed-bit.parity[data-v="0"] {
+      background: #1a1a2e;
+      color: #7c3aed;
+      border: 2px solid #7c3aed;
+    }
+
+    .sealed-bit.parity[data-v="1"] {
+      background: linear-gradient(135deg, #a78bfa, #7c3aed);
+      color: #faf5ff;
+    }
   </style>
 </head>
 
@@ -254,6 +350,15 @@
   <div class="checks" id="checks"></div>
   <div class="syndrome" id="syndrome"></div>
   <button type="button" id="correct" class="correct-btn">Correct</button>
+
+  <section class="text-encode">
+    <div class="seal-controls">
+      <label class="note-label" for="note">Note</label>
+      <input id="note" type="text" autocomplete="off" spellcheck="false">
+      <button type="button" id="seal" class="correct-btn">Seal</button>
+    </div>
+    <div id="sealed" class="sealed-row"></div>
+  </section>
 
   <script>
     (function () {
@@ -389,6 +494,42 @@
       }
 
       updateChecks();
+    })();
+
+    (function () {
+      var PARITY = { 0: true, 1: true, 3: true };
+      var note = document.getElementById('note');
+      var sealed = document.getElementById('sealed');
+
+      function blockFromNibble(nibble) {
+        var d3 = (nibble >> 3) & 1;
+        var d5 = (nibble >> 2) & 1;
+        var d6 = (nibble >> 1) & 1;
+        var d7 = nibble & 1;
+        return [d3 ^ d5 ^ d7, d3 ^ d6 ^ d7, d3, d5 ^ d6 ^ d7, d5, d6, d7];
+      }
+
+      document.getElementById('seal').addEventListener('click', function () {
+        var text = note.value.slice(0, 8);
+        sealed.replaceChildren();
+        for (var c = 0; c < text.length; c++) {
+          var byte = text.charCodeAt(c) & 255;
+          var nibbles = [(byte >> 4) & 15, byte & 15];
+          nibbles.forEach(function (nibble) {
+            var bits = blockFromNibble(nibble);
+            var block = document.createElement('div');
+            block.className = 'sealed-block';
+            bits.forEach(function (bit, i) {
+              var cell = document.createElement('div');
+              cell.className = 'sealed-bit ' + (PARITY[i] ? 'parity' : 'data');
+              cell.setAttribute('data-v', String(bit));
+              cell.textContent = String(bit);
+              block.appendChild(cell);
+            });
+            sealed.appendChild(block);
+          });
+        }
+      });
     })();
   </script>
 </body>
