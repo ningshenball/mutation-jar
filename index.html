@@ -302,6 +302,7 @@
 
     .sealed-block {
       display: flex;
+      align-items: center;
       gap: 4px;
     }
 
@@ -337,6 +338,14 @@
     .sealed-bit.parity[data-v="1"] {
       background: linear-gradient(135deg, #a78bfa, #7c3aed);
       color: #faf5ff;
+    }
+
+    .sealed-bit.overall {
+      width: 18px;
+      height: 18px;
+      margin-right: 4px;
+      border-radius: 5px;
+      font-size: .65rem;
     }
 
     .scratch-controls {
@@ -539,7 +548,7 @@
     })();
 
     (function () {
-      var PARITY = { 0: true, 1: true, 3: true };
+      var HAMMING_PARITY = { 1: true, 2: true, 4: true };
       var note = document.getElementById('note');
       var sealed = document.getElementById('sealed');
       var scratched = document.getElementById('scratched');
@@ -551,7 +560,13 @@
         var d5 = (nibble >> 2) & 1;
         var d6 = (nibble >> 1) & 1;
         var d7 = nibble & 1;
-        return [d3 ^ d5 ^ d7, d3 ^ d6 ^ d7, d3, d5 ^ d6 ^ d7, d5, d6, d7];
+        var p1 = d3 ^ d5 ^ d7;
+        var p2 = d3 ^ d6 ^ d7;
+        var p4 = d5 ^ d6 ^ d7;
+        var hamming = [p1, p2, d3, p4, d5, d6, d7];
+        var p0 = 0;
+        hamming.forEach(function (bit) { p0 ^= bit; });
+        return [p0].concat(hamming);
       }
 
       function renderBlocks(container, blocks) {
@@ -561,7 +576,8 @@
           block.className = 'sealed-block';
           bits.forEach(function (bit, i) {
             var cell = document.createElement('div');
-            cell.className = 'sealed-bit ' + (PARITY[i] ? 'parity' : 'data');
+            var kind = i === 0 ? 'overall parity' : (HAMMING_PARITY[i] ? 'parity' : 'data');
+            cell.className = 'sealed-bit ' + kind;
             cell.setAttribute('data-v', String(bit));
             cell.textContent = String(bit);
             block.appendChild(cell);
@@ -579,21 +595,37 @@
       }
 
       function nibbleFrom(bits) {
-        return (bits[2] << 3) | (bits[4] << 2) | (bits[5] << 1) | bits[6];
+        return (bits[3] << 3) | (bits[5] << 2) | (bits[6] << 1) | bits[7];
       }
 
       function syndrome(bits) {
-        var check1 = bits[0] ^ bits[2] ^ bits[4] ^ bits[6];
-        var check2 = bits[1] ^ bits[2] ^ bits[5] ^ bits[6];
-        var check4 = bits[3] ^ bits[4] ^ bits[5] ^ bits[6];
+        var hamming = bits.slice(1);
+        var check1 = hamming[0] ^ hamming[2] ^ hamming[4] ^ hamming[6];
+        var check2 = hamming[1] ^ hamming[2] ^ hamming[5] ^ hamming[6];
+        var check4 = hamming[3] ^ hamming[4] ^ hamming[5] ^ hamming[6];
         return (check4 << 2) | (check2 << 1) | check1;
+      }
+
+      function overallOdd(bits) {
+        var sum = 0;
+        bits.forEach(function (bit) { sum ^= bit; });
+        return sum === 1;
       }
 
       function repairBlock(bits) {
         var next = bits.slice();
         var syn = syndrome(next);
-        if (syn >= 1 && syn <= 7) next[syn - 1] ^= 1;
-        return next;
+        var odd = overallOdd(next);
+        if (syn === 0 && !odd) return { bits: next, ok: true };
+        if (syn >= 1 && syn <= 7 && odd) {
+          next[syn] ^= 1;
+          return { bits: next, ok: true };
+        }
+        if (syn === 0 && odd) {
+          next[0] ^= 1;
+          return { bits: next, ok: true };
+        }
+        return { bits: bits.slice(), ok: false };
       }
 
       function charFrom(byte) {
@@ -601,14 +633,33 @@
         return String.fromCharCode(byte);
       }
 
-      function decode(blocks) {
+      function decodeRaw(blocks) {
         var text = '';
         for (var i = 0; i < blocks.length; i += 2) {
-          if (i + 1 >= blocks.length || blocks[i].length !== 7 || blocks[i + 1].length !== 7) {
+          if (i + 1 >= blocks.length || blocks[i].length !== 8 || blocks[i + 1].length !== 8) {
             text += '?';
             break;
           }
           var byte = (nibbleFrom(blocks[i]) << 4) | nibbleFrom(blocks[i + 1]);
+          text += charFrom(byte);
+        }
+        return text;
+      }
+
+      function decodeRepaired(blocks) {
+        var text = '';
+        for (var i = 0; i < blocks.length; i += 2) {
+          if (i + 1 >= blocks.length || blocks[i].length !== 8 || blocks[i + 1].length !== 8) {
+            text += '?';
+            break;
+          }
+          var a = repairBlock(blocks[i]);
+          var b = repairBlock(blocks[i + 1]);
+          if (!a.ok || !b.ok) {
+            text += '?';
+            continue;
+          }
+          var byte = (nibbleFrom(a.bits) << 4) | nibbleFrom(b.bits);
           text += charFrom(byte);
         }
         return text;
@@ -637,8 +688,8 @@
           });
         });
         renderBlocks(scratched, copy);
-        document.getElementById('raw').textContent = decode(copy);
-        document.getElementById('repaired').textContent = decode(copy.map(repairBlock));
+        document.getElementById('raw').textContent = decodeRaw(copy);
+        document.getElementById('repaired').textContent = decodeRepaired(copy);
       });
     })();
   </script>
